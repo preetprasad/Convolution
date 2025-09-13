@@ -1,72 +1,91 @@
-//==============================================================================
-//  conv1d.c — 1-D Convolution with Mode (-m) and Padding (-p), incl. CONST pad
-//==============================================================================
-//
-//  Description:
-//  ------------
-//  Computes 1-D TRUE convolution y = f * g with two output length modes:
-//    • mode = same : output length N  (assignment default)
-//    • mode = full : output length N + K − 1  (useful for debugging)
-//  Padding policy controls how values outside input range are treated
-//  (only meaningful for mode=same):
-//    • padding = zero  : use 0.0f (assignment default)
-//    • padding = none  : ignore out-of-range contributions
-//    • padding = const : use a user-supplied constant (via -c/--cval)
-//
-//  Inputs can be read from files or generated randomly (uniform in [-1, 1]).
-//  Only the convolution kernel time is printed to stderr (I/O and generation
-//  are excluded), per project timing guidance.
-//
-//  Command-line interface (hybrid):
-//    Short / assignment-style / long:
-//      -f <f.txt>     | --file <f.txt>        : read f (1-D: N then N floats)
-//      -g <g.txt>     | --kernel <g.txt>      : read g (1-D: K then K floats)
-//      -o <out.txt>   | --out <out.txt>       : write output (1-D format)
-//      -s <seed>      | --seed <seed>         : RNG seed (generation only)
-//      -L <N>         | --len <N>             : generate f of length N (if no -f)
-//      -kL <K>        | --klen <K>            : generate g of length K (if no -g)
-//      -m <mode>      | --mode <mode>         : same|full        (default: same)
-//      -p <padding>   | --padding <padding>   : zero|none|const  (default: zero)
-//      -c <value>     | --cval <value>        : constant pad value for -p const
-//
-//  File format (1-D):
-//    Line 1 : integer length L (>0)
-//    Line 2 : L space-separated floats
-//
-//  Numerical policy:
-//    • Arrays are single-precision floats (float32).
-//    • Accumulation uses double for improved stability; stored to float.
-//
-//  Timing policy:
-//    • Report ONLY the convolution time (exclude I/O and random generation).
-//
-//  Build:
-//    cc -std=c11 -O2 -Wall -Wextra -Werror -o conv1d conv1d.c
-//
-//  Examples:
-//    # Assignment-like defaults: SAME + ZERO padding
-//    ./conv1d -L 1024 -kL 5 -o y.txt -s 42
-//
-//    # SAME length with constant padding value 1.5
-//    ./conv1d -L 16 -kL 5 -m same -p const -c 1.5 -o y.txt
-//
-//    # FULL length (padding irrelevant)
-//    ./conv1d -L 16 -kL 3 -m full -p none -o y.txt
-//
-//  Platform:   Apple / Linux (Kaya)
-//==============================================================================
+/**
+ * @file conv1d.c
+ * @brief 1-D Convolution with multiple modes, padding strategies, reproducible RNG, assignment-compliant I/O, and per-run CSV metrics.
+ *
+ * This program implements TRUE 1-D convolution (y = f * g) with support for
+ * multiple output length modes, padding policies, reproducible random input
+ * generation, assignment-style I/O, accurate timing, and automatic metrics
+ * logging to CSV. It is designed to match project specifications for stress
+ * testing on single nodes (e.g., Kaya cluster) while remaining flexible for
+ * debugging and reproducibility.
+ *
+ * ### Output length modes (-m/--mode):
+ *   - same (default): output length = N (input length)
+ *   - full          : output length = N + K - 1
+ *
+ * ### Padding policies (-p/--padding), applies only for SAME mode:
+ *   - zero  (default): out-of-range values treated as 0.0f
+ *   - none           : out-of-range contributions ignored
+ *   - const          : out-of-range values replaced with a user constant (-c/--cval)
+ *
+ * ### Input options:
+ *   - Read arrays from text files:
+ *       -f <f.txt> | --file <f.txt>        : input signal f
+ *       -g <g.txt> | --kernel <g.txt>      : kernel g
+ *   - Generate random arrays with uniform floats in [-1, 1]:
+ *       -L <N>   | --len <N>   : generate input f of length N
+ *       -kL <K>  | --klen <K>  : generate kernel g of length K
+ *   - RNG reproducibility:
+ *       -s <seed> | --seed <seed> : deterministic seed (defaults to time if omitted)
+ *
+ * ### Output:
+ *   - Assignment-compliant text file:
+ *       Line 1: integer length L
+ *       Line 2: L floats with 3 decimal places, space-separated
+ *   - Written via:
+ *       -o <out.txt> | --out <out.txt>
+ *
+ * ### CSV metrics logging:
+ *   - Each run appends a single row of metrics (N, K, outLen, mode, pad, cval, time)
+ *   - CSVs stored under a "metrics/" directory:
+ *       - On SLURM: metrics/metrics_SLURM_<JOBID>.csv
+ *       - Locally:  metrics/metrics_LOCAL_YYYYMMDD_HHMMSS_<PID>.csv
+ *   - Safe design: each job/run writes to its own file (no race conditions)
+ *   - CSVs can later be merged/analyzed with pandas/matplotlib
+ *
+ * ### Numerical policy:
+ *   - Arrays stored as float32
+ *   - Accumulation uses double to reduce rounding error, then cast back to float
+ *
+ * ### Timing policy:
+ *   - Reports ONLY the convolution kernel execution time to stderr
+ *   - File I/O and RNG excluded (per assignment requirements)
+ *
+ * ### Error handling:
+ *   - Invalid CLI arguments, missing required inputs
+ *   - Bad file formats (wrong header or insufficient data)
+ *   - Memory allocation failures
+ *   - Clear diagnostics with non-zero exit
+ *
+ * ### Platform:
+ *   - Portable C11, tested with:
+ *       - Apple/clang (local development)
+ *       - GCC on Linux clusters (Kaya via SLURM)
+ *
+ * ### Example usage:
+ *   # Default assignment mode: SAME length, ZERO padding, random input
+ *   ./conv1d -L 1024 -kL 5 -o y.txt -s 42
+ *
+ *   # SAME mode with constant padding = 1.5
+ *   ./conv1d -L 16 -kL 5 -m same -p const -c 1.5 -o y.txt
+ *
+ *   # FULL mode convolution, padding ignored
+ *   ./conv1d -L 16 -kL 3 -m full -o y.txt
+ *
+ * @note Build with:
+ *   cc -std=c11 -O2 -Wall -Wextra -Werror -o conv1d conv1d.c
+ */
 
 #define _POSIX_C_SOURCE 200809L
-#include <stdio.h>  // FILE, fopen, fclose, fprintf, fscanf, perror
-#include <stdlib.h> // malloc, free, exit, rand, srand, strtol, strtoul, strtof
-#include <string.h> // strcmp, memset
-#include <time.h>   // time, clock_gettime
-#include <errno.h>  // errno
-#include <getopt.h> // getopt_long
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <errno.h>
+#include <getopt.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
-//------------------------------------------------------------------------------
-// Enumerations and forward declarations
-//------------------------------------------------------------------------------
 typedef enum
 {
     MODE_SAME = 0,
@@ -79,6 +98,7 @@ typedef enum
     PAD_CONST = 2
 } pad_mode;
 
+// Forward declarations */
 void usage(const char *prog);
 int parse_args(int argc, char **argv,
                const char **f_path, const char **g_path, const char **o_path,
@@ -92,9 +112,13 @@ void conv1d_full(const float *f, int N, const float *g, int K, float *out);
 void conv1d_same(const float *f, int N, const float *g, int K, float *out,
                  pad_mode pmod, float cval);
 double elapsed_seconds(struct timespec a, struct timespec b);
+void ensure_dir(const char *path);
+void log_metrics(int N, int K, int outLen,
+                conv_mode cmode, pad_mode pmode, float cval,
+                double elapsed_secs);
 
 /**
- * Prints the usage information for the program.
+ * Prints usage information for the program.
  * @param prog  Program name, typically argv[0].
  */
 void usage(const char *prog)
@@ -112,11 +136,18 @@ void usage(const char *prog)
 
 /**
  * Parses command-line arguments using a hybrid strategy:
- *  - Pre-scan for assignment-style -L and -kL.
- *  - getopt_long for -f/-g/-o/-s and long forms (--file, --len, etc.).
- *  - Parses mode (-m/--mode), padding (-p/--padding), and const value (-c/--cval).
+ *  1) Pre-scan for assignment-style -L / -kL.
+ *  2) Use getopt_long for short and long options.
  *
- * @return 1 on success, 0 on invalid/missing required arguments.
+ * On success fills out all OUT parameters and returns 1.
+ * On failure prints a diagnostic (and usage when relevant) and returns 0.
+ *
+ * @param f_path,g_path,o_path  OUT file paths (nullable).
+ * @param N_req,K_req           OUT lengths when generating (if no files).
+ * @param seed,have_seed        OUT RNG seed and flag if explicitly provided.
+ * @param cmode,pmode           OUT convolution mode and padding policy.
+ * @param cval,have_cval        OUT constant padding value and presence flag.
+ * @return                      1 on success, 0 on invalid/missing args.
  */
 int parse_args(int argc, char **argv,
                const char **f_path, const char **g_path, const char **o_path,
@@ -128,12 +159,12 @@ int parse_args(int argc, char **argv,
     *N_req = *K_req = -1;
     *seed = (unsigned long)time(NULL);
     *have_seed = 0;
-    *cmode = MODE_SAME; // default per assignment
-    *pmode = PAD_ZERO;  // default per assignment
-    *cval = 0.0f;       // default constant (only used if PAD_CONST)
+    *cmode = MODE_SAME; // assignment default
+    *pmode = PAD_ZERO;  // assignment default
+    *cval = 0.0f;
     *have_cval = 0;
 
-    // ---- Pre-scan solely for -L and -kL so they are honored regardless of getopt_long ----
+    // Pre-scan for -L / -kL regardless of order
     for (int i = 1; i + 1 < argc; i++)
     {
         if (strcmp(argv[i], "-L") == 0)
@@ -142,23 +173,21 @@ int parse_args(int argc, char **argv,
             *K_req = strtol(argv[i + 1], NULL, 10);
     }
 
-    // Long option table for getopt_long
     static struct option long_opts[] = {
         {"file", required_argument, 0, 'f'},
         {"kernel", required_argument, 0, 'g'},
         {"out", required_argument, 0, 'o'},
         {"seed", required_argument, 0, 's'},
-        {"len", required_argument, 0, 1},     // --len
-        {"klen", required_argument, 0, 2},    // --klen
-        {"mode", required_argument, 0, 3},    // --mode {same|full}
-        {"padding", required_argument, 0, 4}, // --padding {zero|none|const}
-        {"cval", required_argument, 0, 5},    // --cval <float>
+        {"len", required_argument, 0, 1},
+        {"klen", required_argument, 0, 2},
+        {"mode", required_argument, 0, 3},
+        {"padding", required_argument, 0, 4},
+        {"cval", required_argument, 0, 5},
         {0, 0, 0, 0}};
 
-    int opt, long_index = 0;
-    opterr = 0; // We will print our own usage on errors
-
-    while ((opt = getopt_long(argc, argv, "f:g:o:s:m:p:c:", long_opts, &long_index)) != -1)
+    int opt, idx = 0;
+    opterr = 0;
+    while ((opt = getopt_long(argc, argv, "f:g:o:s:m:p:c:", long_opts, &idx)) != -1)
     {
         switch (opt)
         {
@@ -175,12 +204,11 @@ int parse_args(int argc, char **argv,
             *seed = strtoul(optarg, NULL, 10);
             *have_seed = 1;
             break;
-
-        case 'm': // short -m
-        case 3:   // --mode
-            if (strcmp(optarg, "same") == 0)
+        case 'm':
+        case 3:
+            if (!strcmp(optarg, "same"))
                 *cmode = MODE_SAME;
-            else if (strcmp(optarg, "full") == 0)
+            else if (!strcmp(optarg, "full"))
                 *cmode = MODE_FULL;
             else
             {
@@ -188,14 +216,13 @@ int parse_args(int argc, char **argv,
                 return 0;
             }
             break;
-
-        case 'p': // short -p
-        case 4:   // --padding
-            if (strcmp(optarg, "zero") == 0)
+        case 'p':
+        case 4:
+            if (!strcmp(optarg, "zero"))
                 *pmode = PAD_ZERO;
-            else if (strcmp(optarg, "none") == 0)
+            else if (!strcmp(optarg, "none"))
                 *pmode = PAD_NONE;
-            else if (strcmp(optarg, "const") == 0)
+            else if (!strcmp(optarg, "const"))
                 *pmode = PAD_CONST;
             else
             {
@@ -203,25 +230,22 @@ int parse_args(int argc, char **argv,
                 return 0;
             }
             break;
-
-        case 'c': // short -c
-        case 5:   // --cval
+        case 'c':
+        case 5:
             *cval = strtof(optarg, NULL);
             *have_cval = 1;
             break;
-
         case 1:
             *N_req = strtol(optarg, NULL, 10);
-            break; // --len
+            break; // --len */
         case 2:
             *K_req = strtol(optarg, NULL, 10);
-            break; // --klen
-        default:   /* ignore unknowns; pre-scan handled -L/-kL */
+            break; // --klen */
+        default:
             break;
         }
     }
 
-    // Validate requireds
     if (!*o_path)
     {
         usage(argv[0]);
@@ -229,41 +253,26 @@ int parse_args(int argc, char **argv,
     }
     if (!*f_path && *N_req <= 0)
     {
-        usage(argv[0]);
         fprintf(stderr, "Missing -L/--len for f length\n");
         return 0;
     }
     if (!*g_path && *K_req <= 0)
     {
-        usage(argv[0]);
         fprintf(stderr, "Missing -kL/--klen for g length\n");
         return 0;
     }
-
-    // Sanity: if -p const but no -c provided, keep default 0.0f but warn.
     if (*pmode == PAD_CONST && !*have_cval)
-    {
         fprintf(stderr, "warning: -p const without -c/--cval; using cval=0.0\n");
-    }
-    // Note: padding has no effect for MODE_FULL; we allow it but could warn:
-    if (*cmode == MODE_FULL)
-    {
-        // Optional warning: commented out to avoid noise.
-        // fprintf(stderr, "note: padding ignored for mode=full\n");
-    }
-
     return 1;
 }
 
 /**
- * Reads a 1-D array from a text file in assignment format:
- *   Line 1 : integer length L (>0)
- *   Line 2 : L space-separated floats
+ * Reads a 1-D array from a text file in the assignment format.
+ * On failure prints a diagnostic and terminates the program.
  *
- * Exits the program on any error.
- * @param path     Input file path.
- * @param len_out  OUT: parsed length.
- * @return         malloc'd float array of length *len_out.
+ * @param path     Path to input file.
+ * @param len_out  OUT parsed length L (>0).
+ * @return         Pointer to malloc'd float array of length L.
  */
 float *read_array_1d(const char *path, int *len_out)
 {
@@ -307,13 +316,11 @@ float *read_array_1d(const char *path, int *len_out)
 }
 
 /**
- * Writes a 1-D array to a text file in assignment format:
- *   Line 1 : integer length
- *   Line 2 : values with 3 decimals (space-separated)
+ * Writes a 1-D array to a text file in assignment format.
+ * On failure prints a diagnostic and terminates the program.
  *
- * Exits the program on any error.
- * @param path  Output file path.
- * @param arr   Pointer to array to write.
+ * @param path  Output path.
+ * @param arr   Array pointer.
  * @param len   Number of elements.
  */
 void write_array_1d(const char *path, const float *arr, int len)
@@ -327,18 +334,17 @@ void write_array_1d(const char *path, const float *arr, int len)
 
     fprintf(fp, "%d\n", len);
     for (int i = 0; i < len; i++)
-    {
         fprintf(fp, (i + 1 == len) ? "%.3f\n" : "%.3f ", arr[i]);
-    }
 
     fclose(fp);
 }
 
 /**
- * Generates a length-n array with uniform random floats in [-1, 1].
- * Exits on allocation failure or invalid length.
+ * Generates a length-n array of floats uniformly in [-1, 1].
+ * Terminates on invalid length or allocation failure.
+ *
  * @param n  Length (>0).
- * @return   malloc'd float array of length n.
+ * @return   Pointer to malloc'd float array.
  */
 float *gen_array_1d(int n)
 {
@@ -347,34 +353,30 @@ float *gen_array_1d(int n)
         fprintf(stderr, "invalid length n=%d\n", n);
         exit(EXIT_FAILURE);
     }
+
     float *a = (float *)malloc((size_t)n * sizeof(float));
     if (!a)
     {
         fprintf(stderr, "out of memory generating array (n=%d)\n", n);
         exit(EXIT_FAILURE);
     }
+
     for (int i = 0; i < n; i++)
     {
-        // Uniform in [0,1] scaled to [-1,1]
-        float u01 = (float)rand() / (float)RAND_MAX;
-        a[i] = -1.0f + 2.0f * u01;
+        float u01 = (float)rand() / (float)RAND_MAX; // [0,1]
+        a[i] = -1.0f + 2.0f * u01;                   // [-1,1]
     }
     return a;
 }
 
 /**
- * FULL 1-D convolution (true convolution). Output length is N + K − 1.
- * Implementation:
- *   out[i + j] += f[i] * g[j], i in [0..N-1], j in [0..K-1]
- * Notes:
- *   - Padding mode has no effect for FULL (indices always valid in out).
- *   - Double accumulator reduces rounding error; stored as float.
+ * Computes FULL 1-D convolution.
+ * Output length is N + K − 1. Padding policy is irrelevant for FULL.
+ * Uses a double accumulator then stores back to float.
  *
- * @param f    Input array (len N).
- * @param N    Length of f.
- * @param g    Kernel array (len K).
- * @param K    Length of g.
- * @param out  Output array (len N+K-1). Must be allocated.
+ * @param f,g  Input arrays (lengths N and K).
+ * @param N,K  Input lengths.
+ * @param out  Output array of length N+K−1 (must be allocated by caller).
  */
 void conv1d_full(const float *f, int N, const float *g, int K, float *out)
 {
@@ -386,6 +388,7 @@ void conv1d_full(const float *f, int N, const float *g, int K, float *out)
         const double fi = (double)f[i];
         for (int j = 0; j < K; j++)
         {
+            // out[i+j] form already encodes true convolution (no explicit flip needed).
             const int n = i + j; // 0..N+K-2
             const double acc = (double)out[n] + fi * (double)g[j];
             out[n] = (float)acc;
@@ -394,26 +397,20 @@ void conv1d_full(const float *f, int N, const float *g, int K, float *out)
 }
 
 /**
- * SAME 1-D convolution (true convolution). Output length is N.
- * Implementation:
- *   y[n] = sum_{m=0..K-1} F(n + (m − c)) * g[m],  where c = floor(K/2)
- *   with boundary handling controlled by pad_mode:
- *     - PAD_ZERO : F(out-of-range) = 0.0f
- *     - PAD_NONE : skip out-of-range contributions
- *     - PAD_CONST: F(out-of-range) = cval
+ * Computes SAME-length 1-D convolution with padding control.
+ * y[n] = sum_{m=0..K-1} F(n + (m − c)) * g[m], where c = floor(K/2)
+ * and F(.) is defined by padding policy.
  *
- * @param f     Input array (len N).
- * @param N     Length of f.
- * @param g     Kernel array (len K).
- * @param K     Length of g.
- * @param out   Output array (len N). Must be allocated.
- * @param pmod  Padding mode.
- * @param cval  Constant pad value when pmod == PAD_CONST.
+ * @param f,g    Input arrays (lengths N and K).
+ * @param N,K    Input lengths.
+ * @param out    Output array of length N (must be allocated by caller).
+ * @param pmod   Padding policy (zero|none|const).
+ * @param cval   Constant pad value when pmod == PAD_CONST.
  */
 void conv1d_same(const float *f, int N, const float *g, int K, float *out,
                  pad_mode pmod, float cval)
 {
-    const int c = K / 2; // anchor
+    const int c = K / 2; // kernel anchor for SAME
     memset(out, 0, (size_t)N * sizeof(float));
 
     for (int n = 0; n < N; n++)
@@ -421,26 +418,18 @@ void conv1d_same(const float *f, int N, const float *g, int K, float *out,
         double acc = 0.0;
         for (int m = 0; m < K; m++)
         {
-            const int idx = n + (m - c); // index into f
-
+            const int idx = n + (m - c);
             if (idx >= 0 && idx < N)
             {
                 acc += (double)f[idx] * (double)g[m];
             }
             else
             {
-                if (pmod == PAD_NONE)
-                {
-                    // skip contribution
-                }
-                else if (pmod == PAD_ZERO)
-                {
-                    // add 0.0f (no-op)
-                }
-                else if (pmod == PAD_CONST)
+                if (pmod == PAD_CONST)
                 {
                     acc += (double)cval * (double)g[m];
                 }
+                // PAD_ZERO: add 0 (no-op). PAD_NONE: skip contribution.
             }
         }
         out[n] = (float)acc;
@@ -448,10 +437,11 @@ void conv1d_same(const float *f, int N, const float *g, int K, float *out,
 }
 
 /**
- * Computes elapsed seconds between two CLOCK_MONOTONIC timestamps.
+ * Returns elapsed seconds between two CLOCK_MONOTONIC timestamps.
+ *
  * @param a  Start timestamp.
  * @param b  End timestamp.
- * @return   Elapsed wall time in seconds (fractional).
+ * @return   Elapsed wall-time in seconds (fractional).
  */
 double elapsed_seconds(struct timespec a, struct timespec b)
 {
@@ -459,11 +449,85 @@ double elapsed_seconds(struct timespec a, struct timespec b)
 }
 
 /**
+ * Ensures a directory exists; creates it if missing (best-effort).
+ *
+ * @param path  Directory path (e.g., "metrics").
+ */
+void ensure_dir(const char *path)
+{
+    struct stat st;
+    if (stat(path, &st) != 0)
+    {
+        (void)mkdir(path, 0775); // ignore EEXIST race
+    }
+}
+
+/**
+ * Writes a single CSV file for this run into "metrics/" with a unique name.
+ * • On SLURM:  metrics/metrics_SLURM_<JOBID>.csv
+ * • Locally:   metrics/metrics_LOCAL_YYYYMMDD_HHMMSS_<PID>.csv
+ * The file contains a header and one data row for this execution.
+ *
+ * @param N,K,outLen     Problem sizes.
+ * @param cmode,pmode    Mode and padding used.
+ * @param cval           Constant padding value (if PAD_CONST; printed for completeness).
+ * @param elapsed_secs   Convolution time in seconds.
+ */
+void log_metrics(int N, int K, int outLen,
+                           conv_mode cmode, pad_mode pmode, float cval,
+                           double elapsed_secs)
+{
+    ensure_dir("metrics/o0");
+
+    // Build run id from SLURM_JOB_ID or timestamp+PID for local runs
+    const char *slurm = getenv("SLURM_JOB_ID");
+    char runid[128];
+
+    if (slurm && slurm[0])
+    {
+        snprintf(runid, sizeof(runid), "SLURM_%s", slurm);
+    }
+    else
+    {
+        time_t t = time(NULL);
+        struct tm tm;
+        localtime_r(&t, &tm);
+        pid_t pid = getpid();
+        strftime(runid, sizeof(runid), "LOCAL_%Y%m%d_%H%M%S", &tm);
+        size_t len = strlen(runid);
+        snprintf(runid + len, sizeof(runid) - len, "_%d", (int)pid);
+    }
+
+    char fname[256];
+    snprintf(fname, sizeof(fname), "metrics/o0/metrics_%s.csv", runid);
+
+    FILE *csv = fopen(fname, "w");
+    if (!csv)
+    {
+        perror(fname);
+        return;
+    }
+
+    fprintf(csv, "RunID,N,K,outLen,mode,padding,cval,time\n");
+    fprintf(csv, "%s,%d,%d,%d,%s,%s,%.9g,%.9f\n",
+            runid, N, K, outLen,
+            (cmode == MODE_FULL ? "full" : "same"),
+            (pmode == PAD_ZERO ? "zero" : (pmode == PAD_NONE ? "none" : "const")),
+            (pmode == PAD_CONST ? (double)cval : 0.0),
+            elapsed_secs);
+
+    fclose(csv);
+}
+
+/**
  * Program entry point:
  *  1) Parse CLI
  *  2) Read or generate inputs
- *  3) Time ONLY the convolution
- *  4) Write output (assignment format)
+ *  3) Time ONLY the convolution (exclude I/O and RNG)
+ *  4) Persist per-run metrics CSV
+ *  5) Write output array (assignment format)
+ *
+ * @return EXIT_SUCCESS on success; EXIT_FAILURE on invalid arguments or OOM.
  */
 int main(int argc, char **argv)
 {
@@ -485,11 +549,7 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    // Seed RNG (deterministic if user supplied -s/--seed)
-    if (have_seed)
-        srand((unsigned)seed);
-    else
-        srand((unsigned)seed);
+    srand((unsigned)seed); // deterministic if -s/--seed used
 
     // Prepare f
     int N = 0;
@@ -513,8 +573,8 @@ int main(int argc, char **argv)
         g = gen_array_1d(K);
     }
 
-    // Allocate output based on mode
-    int outLen = (cmode == MODE_FULL) ? (N + K - 1) : N;
+    // Allocate output
+    const int outLen = (cmode == MODE_FULL) ? (N + K - 1) : N;
     float *out = (float *)malloc((size_t)outLen * sizeof(float));
     if (!out)
     {
@@ -524,10 +584,9 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    // ---- Measure ONLY the convolution (exclude I/O and generation) ----
+    // Time ONLY the convolution
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
-
     if (cmode == MODE_FULL)
     {
         conv1d_full(f, N, g, K, out);
@@ -536,9 +595,11 @@ int main(int argc, char **argv)
     {
         conv1d_same(f, N, g, K, out, pmode, cval);
     }
-
     clock_gettime(CLOCK_MONOTONIC, &t1);
+
     const double secs = elapsed_seconds(t0, t1);
+
+    // Human-readable timing to stderr
     fprintf(stderr, "N=%d K=%d outLen=%d mode=%s pad=%s cval=%.6g | conv_time=%.9f s\n",
             N, K, outLen,
             (cmode == MODE_FULL ? "full" : "same"),
@@ -546,10 +607,12 @@ int main(int argc, char **argv)
             (pmode == PAD_CONST ? cval : 0.0),
             secs);
 
-    // Write output
+    // Persist per-run metrics (safe for arrays / local)
+    log_metrics(N, K, outLen, cmode, pmode, cval, secs);
+
+    // Write output array
     write_array_1d(o_path, out, outLen);
 
-    // Cleanup
     free(f);
     free(g);
     free(out);

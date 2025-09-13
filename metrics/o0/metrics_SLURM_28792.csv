@@ -1,0 +1,2 @@
+RunID,N,K,outLen,mode,padding,cval,time
+SLURM_28792,1070009999,11,1070009999,same,zero,0,29.738459068
