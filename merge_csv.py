@@ -89,4 +89,4 @@ if __name__ == "__main__":
     files = [f for f in sys.argv[1:] if not f.startswith("--")]
     delete_flag = "--delete" in sys.argv
 
-    merge_csv(files, out="metrics/merged.csv", delete=delete_flag)
+    merge_csv(files, out="metrics/merged_2d_omp_o3.csv", delete=delete_flag)

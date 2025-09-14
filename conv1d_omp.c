@@ -8,7 +8,7 @@
  *   • Padding policies (-p/--padding) for SAME mode: zero (default), none, const (-c/--cval).
  *   • Inputs from files (-f/-g) or generated uniformly in [-1,1] (-L/-kL, optional -s/--seed).
  *   • Accurate timing of ONLY the convolution kernel (I/O/RNG excluded).
- *   • Per-run CSV metrics under metrics/o0/, uniquely named for SLURM vs local runs.
+ *   • Per-run CSV metrics under metrics/, uniquely named for SLURM vs local runs.
  *   • OpenMP parallelization with deterministic defaults and CLI overrides:
  *        -t, --threads <int>          : number of threads (default: 1)
  *        -S, --schedule <kind>        : static|dynamic|guided|auto (default: static)
@@ -485,7 +485,7 @@ void log_metrics(int N, int K, int outLen,
                  double elapsed_secs,
                  int threads, const char *sched_str, int chunk)
 {
-    ensure_dir("metrics/o0");
+    ensure_dir("metrics/omp/o3");
 
     const char *slurm = getenv("SLURM_JOB_ID");
     char runid[128];
@@ -505,7 +505,7 @@ void log_metrics(int N, int K, int outLen,
     }
 
     char fname[256];
-    snprintf(fname, sizeof(fname), "metrics/o0/metrics_%s.csv", runid);
+    snprintf(fname, sizeof(fname), "metrics/omp/o3/metrics_%s.csv", runid);
     FILE *csv = fopen(fname, "w");
     if (!csv)
     {

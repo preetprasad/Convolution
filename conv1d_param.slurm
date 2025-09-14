@@ -1,7 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=conv1d_param
 #SBATCH --partition=cits3402
-#SBATCH --time=01:00:00
 #SBATCH --mem=8G
 #SBATCH --cpus-per-task=1
 #SBATCH --output=logs/conv1d_%j.out
@@ -9,7 +8,7 @@
 
 # Compile the program (if needed)
 if [ ! -x ./conv1d ] || [ conv1d.c -nt conv1d ]; then
-  cc -std=c11 -Wall -Wextra -Werror -o conv1d conv1d.c || exit 1
+  cc -std=c11 -O3 -march=native -funroll-loops -fopt-info-vec -o conv1d conv1d.c || exit 1
 fi
 
 # Validate args
@@ -25,7 +24,7 @@ SEED="${3:-}"
 # mkdir -p metrics
 
 # Separate dirs for different optimisation levels
-# mkdir -p metrics/o0
+# mkdir -p metrics/o3
 
 # Write output array to /dev/null
 OUT="/dev/null"
