@@ -69,10 +69,11 @@ submit_and_block() {
 
   jobid=$(awk '{print $4}' <<<"$submit_out")
   [[ -n "${jobid:-}" ]] || { echo "Failed to parse job id from: $submit_out" >&2; exit 3; }
-  echo "Submitted JOBID=$jobid  (N=$N, K=$K, threads=$THREADS, sched=$SCHED)"
+  echo "Submitted JOBID=$jobid  (N=$N, K=$K, threads=$THREADS, sched=$SCHED, stride=$STRIDE)"
 
   local err="logs/conv1d_omp_${jobid}.err"
-  local csv="metrics/metrics_SLURM_${jobid}.csv"
+  # conv1d_omp writes metrics under metrics/o0/
+  local csv="metrics/o0/metrics_SLURM_${jobid}.csv"
 
   # Wait while job is still in queue/running
   while squeue -j "$jobid" -h 2>/dev/null | grep -q . ; do

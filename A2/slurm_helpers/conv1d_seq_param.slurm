@@ -9,8 +9,12 @@
 #SBATCH --output=logs/conv1d_%j.out
 #SBATCH --error=logs/conv1d_%j.err
 
-# Load compiler
-module load gcc/14.2
+# Load compiler (tolerant & quiet). Some clusters don't have gcc/14.2.
+if type module &>/dev/null; then
+  module -q load gcc/14.2 2>/dev/null || \
+  module -q load gcc       2>/dev/null || \
+  echo "Note: gcc module not loaded; using system compiler (cc)" >&2
+fi
 
 # Usage:
 #   sbatch conv1d_seq_param.slurm N K [MODE] [PADDING] [STRIDE] [SEED]

@@ -79,10 +79,11 @@ submit_and_block() {
 
   jobid=$(awk '{print $4}' <<<"$submit_out")
   [[ -n "${jobid:-}" ]] || { echo "Failed to parse job id from: $submit_out" >&2; exit 3; }
-  echo "Submitted JOBID=$jobid  (H=$H, W=$W, kH=$KH, kW=$KW, threads=$THREADS, sched=$SCHED)"
+  echo "Submitted JOBID=$jobid  (H=$H, W=$W, kH=$KH, kW=$KW, threads=$THREADS, sched=$SCHED, sH=$STRIDE_H, sW=$STRIDE_W)"
 
   local err="logs/conv2d_omp_${jobid}.err"
-  local csv="metrics/metrics_SLURM_${jobid}.csv"
+  # conv2d_omp writes metrics under metrics/o0/ per conv2d_omp.c
+  local csv="metrics/o0/metrics_SLURM_${jobid}.csv"
 
   # Wait while job is still in queue/running
   while squeue -j "$jobid" -h 2>/dev/null | grep -q . ; do
@@ -115,7 +116,7 @@ for H in $(range_step "$HMIN" "$HMAX" "$HSTEP"); do
     echo "=== H=$H, W=$W ==="
     for KH in $(range_step "$KHMIN" "$KHMAX" "$KHSTEP"); do
       for KW in $(range_step "$KWMIN" "$KWMAX" "$KWSTEP"); do
-        echo " -> kH=$KH, kW=$KW"
+        echo " -> kH=$KH, kW=$KW, sH=$STRIDE_H, sW=$STRIDE_W"
         submit_and_block "$H" "$W" "$KH" "$KW"
       done
     done

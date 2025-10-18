@@ -11,8 +11,11 @@
 #SBATCH --error=logs/conv1d_mpi_%j.err
 
 # Load compiler + MPI
-module load gcc/14.2
-module load openmpi/5.0.5
+# Load compiler/MPI (tolerant & quiet). Some clusters use different module names.
+if type module &>/dev/null; then
+  module -q load gcc/14.2    2>/dev/null || module -q load gcc       2>/dev/null || echo "Note: gcc module not loaded; using system compiler" >&2
+  module -q load openmpi/5.0.5 2>/dev/null || module -q load openmpi 2>/dev/null || echo "Note: openmpi module not loaded; relying on mpicc in PATH" >&2
+fi
 
 # Usage:
 #   sbatch conv1d_mpi_param.slurm N K [NP] [MODE] [PADDING] [STRIDE] [SEED]

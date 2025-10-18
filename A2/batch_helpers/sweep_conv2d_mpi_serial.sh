@@ -70,7 +70,7 @@ submit_and_block() {
 
   jobid=$(awk '{print $4}' <<<"$submit_out")
   [[ -n "${jobid:-}" ]] || { echo "Failed to parse job id from: $submit_out" >&2; exit 3; }
-  echo "Submitted JOBID=$jobid  (H=$H, W=$W, kH=$KH, kW=$KW, np=$NP)"
+  echo "Submitted JOBID=$jobid  (H=$H, W=$W, kH=$KH, kW=$KW, np=$NP, sH=$STRIDE_H, sW=$STRIDE_W)"
 
   local err="logs/conv2d_mpi_${jobid}.err"
   local csv="metrics/metrics_SLURM_${jobid}.csv"
@@ -107,6 +107,7 @@ for H in $(range_step "$HMIN" "$HMAX" "$HSTEP"); do
     echo " -> W=$W"
     for KH in $(range_step "$KHMIN" "$KHMAX" "$KHSTEP"); do
       for KW in $(range_step "$KWMIN" "$KWMAX" "$KWSTEP"); do
+        echo "    kH=$KH, kW=$KW, sH=$STRIDE_H, sW=$STRIDE_W"
         submit_and_block "$H" "$W" "$KH" "$KW"
       done
     done

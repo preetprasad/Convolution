@@ -62,7 +62,7 @@ submit_and_block() {
 
   jobid=$(awk '{print $4}' <<<"$submit_out")
   [[ -n "${jobid:-}" ]] || { echo "Failed to parse job id from: $submit_out" >&2; exit 3; }
-  echo "Submitted JOBID=$jobid  (N=$N, K=$K)"
+  echo "Submitted JOBID=$jobid  (N=$N, K=$K, stride=$STRIDE)"
 
   local err="logs/conv1d_${jobid}.err"
   local csv="metrics/metrics_SLURM_${jobid}.csv"
