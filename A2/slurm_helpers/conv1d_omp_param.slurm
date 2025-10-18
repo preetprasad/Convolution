@@ -13,7 +13,7 @@
 module load gcc/14.2
 
 # Usage:
-#   sbatch conv1d_omp_param.slurm N K [THREADS] [SCHED] [CHUNK] [MODE] [PADDING] [SEED]
+#   sbatch conv1d_omp_param.slurm N K [THREADS] [SCHED] [CHUNK] [MODE] [PADDING] [STRIDE] [SEED]
 #
 # Positional:
 #   N, K           : input and kernel lengths
@@ -24,6 +24,7 @@ module load gcc/14.2
 #   CHUNK          : OpenMP chunk size (optional, leave empty for default)
 #   MODE           : convolution mode (same|full, default: same)
 #   PADDING        : padding mode (zero|none|const, default: zero)
+#   STRIDE         : output stride (default: 1)
 #   SEED           : RNG seed (optional)
 
 mkdir -p logs metrics
@@ -34,7 +35,7 @@ if [ ! -x ./conv1d_omp ] || [ conv1d_omp.c -nt conv1d_omp ]; then
 fi
 
 if [ $# -lt 2 ]; then
-  echo "Usage: sbatch conv1d_omp_param.slurm N K [THREADS] [SCHED] [CHUNK] [MODE] [PADDING] [SEED]" >&2
+  echo "Usage: sbatch conv1d_omp_param.slurm N K [THREADS] [SCHED] [CHUNK] [MODE] [PADDING] [STRIDE] [SEED]" >&2
   exit 2
 fi
 
@@ -45,7 +46,8 @@ SCHED="${4:-static}"   # OpenMP schedule
 CHUNK="${5:-}"         # OpenMP chunk size
 MODE="${6:-same}"      # convolution mode
 PADDING="${7:-zero}"   # padding mode
-SEED="${8:-}"          # RNG seed
+STRIDE="${8:-1}"       # output stride
+SEED="${9:-}"          # RNG seed
 
 OUT="/dev/null"
 
@@ -64,7 +66,7 @@ else
 fi
 
 # Build command
-CMD=( ./conv1d_omp -L "$N" -kL "$K" -o "$OUT" -m "$MODE" -p "$PADDING" )
+CMD=( ./conv1d_omp -L "$N" -kL "$K" -o "$OUT" -m "$MODE" -p "$PADDING" -st "$STRIDE" )
 CMD+=( --threads "$THREADS" --schedule "$SCHED" )
 [ -n "$CHUNK" ] && [ "$CHUNK" -gt 0 ] 2>/dev/null && CMD+=( --chunk "$CHUNK" )
 [ -n "$SEED" ] && CMD+=( -s "$SEED" )

@@ -13,7 +13,7 @@
 module load gcc/14.2
 
 # Usage:
-#   sbatch conv1d_seq_param.slurm N K [MODE] [PADDING] [SEED]
+#   sbatch conv1d_seq_param.slurm N K [MODE] [PADDING] [STRIDE] [SEED]
 #
 # Positional:
 #   N, K           : input and kernel lengths
@@ -21,6 +21,7 @@ module load gcc/14.2
 # Optional:
 #   MODE           : convolution mode (same|full, default: same)
 #   PADDING        : padding mode (zero|none|const, default: zero)
+#   STRIDE         : output stride (default: 1)
 #   SEED           : RNG seed (optional)
 
 mkdir -p logs metrics
@@ -31,7 +32,7 @@ if [ ! -x ./conv1d ] || [ conv1d.c -nt conv1d ]; then
 fi
 
 if [ $# -lt 2 ]; then
-  echo "Usage: sbatch conv1d_seq_param.slurm N K [MODE] [PADDING] [SEED]" >&2
+  echo "Usage: sbatch conv1d_seq_param.slurm N K [MODE] [PADDING] [STRIDE] [SEED]" >&2
   exit 2
 fi
 
@@ -39,12 +40,13 @@ N="$1"
 K="$2"
 MODE="${3:-same}"     # convolution mode
 PADDING="${4:-zero}"  # padding mode
-SEED="${5:-}"         # RNG seed
+STRIDE="${5:-1}"      # output stride
+SEED="${6:-}"         # RNG seed
 
 OUT="/dev/null"
 
 # Build command
-CMD=( ./conv1d -L "$N" -kL "$K" -o "$OUT" -m "$MODE" -p "$PADDING" )
+CMD=( ./conv1d -L "$N" -kL "$K" -o "$OUT" -m "$MODE" -p "$PADDING" -st "$STRIDE" )
 [ -n "$SEED" ] && CMD+=( -s "$SEED" )
 
 echo "Running: ${CMD[*]}"

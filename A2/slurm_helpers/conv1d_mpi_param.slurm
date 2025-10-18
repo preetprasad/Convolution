@@ -15,7 +15,7 @@ module load gcc/14.2
 module load openmpi/5.0.5
 
 # Usage:
-#   sbatch conv1d_mpi_param.slurm N K [NP] [MODE] [PADDING] [SEED]
+#   sbatch conv1d_mpi_param.slurm N K [NP] [MODE] [PADDING] [STRIDE] [SEED]
 #
 # Positional:
 #   N, K           : input and kernel lengths
@@ -24,6 +24,7 @@ module load openmpi/5.0.5
 #   NP             : number of MPI processes (default: 4, must match --ntasks)
 #   MODE           : convolution mode (same|full, default: same)
 #   PADDING        : padding mode (zero|none|const, default: zero)
+#   STRIDE         : output stride (default: 1)
 #   SEED           : RNG seed (optional)
 
 mkdir -p logs metrics
@@ -34,7 +35,7 @@ if [ ! -x ./conv1d_mpi ] || [ conv1d_mpi.c -nt conv1d_mpi ]; then
 fi
 
 if [ $# -lt 2 ]; then
-  echo "Usage: sbatch conv1d_mpi_param.slurm N K [NP] [MODE] [PADDING] [SEED]" >&2
+  echo "Usage: sbatch conv1d_mpi_param.slurm N K [NP] [MODE] [PADDING] [STRIDE] [SEED]" >&2
   exit 2
 fi
 
@@ -43,13 +44,14 @@ K="$2"
 NP="${3:-4}"          # number of MPI processes
 MODE="${4:-same}"     # convolution mode
 PADDING="${5:-zero}"  # padding mode
-SEED="${6:-}"         # RNG seed
+STRIDE="${6:-1}"      # output stride
+SEED="${7:-}"         # RNG seed
 
 OUT="/dev/null"
 
 # Build command
-CMD=( mpiexec -n "$NP" ./conv1d_mpi -L "$N" -kL "$K" -o "$OUT" -m "$MODE" -p "$PADDING" )
-[ -n "$SEED" ] && CMD+=( -s "$SEED" )
+CMD=( mpiexec -n "$NP" ./conv1d_mpi -L "$N" -kL "$K" -o "$OUT" -m "$MODE" -p "$PADDING" -st "$STRIDE" )
+[ -n "$SEED" ] && CMD+=( -se "$SEED" )
 
 echo "Running: ${CMD[*]}"
 "${CMD[@]}"

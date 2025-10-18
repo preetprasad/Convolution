@@ -1,28 +1,30 @@
 #!/usr/bin/env bash
-# Serial SLURM sweep for conv2d_mpi: stepped loops over H,W and kH,kW.
+# Serial SLURM sweep for conv2d_omp (OpenMP)
 # Submits one job at a time and blocks until BOTH stderr and metrics CSV appear.
 #
 # Usage:
-#   ./sweep_conv2d_mpi_serial.sh HMIN HMAX H_STEP WMIN WMAX W_STEP KHMIN KHMAX KH_STEP KWMIN KWMAX KW_STEP [POST_COPY_WAIT] [FILE_WAIT_RETRIES] [NP] [STRIDE_H] [STRIDE_W] [SEED]
+#   ./sweep_conv2d_omp_serial.sh HMIN HMAX H_STEP WMIN WMAX W_STEP KHMIN KHMAX KH_STEP KWMIN KWMAX KW_STEP [THREADS] [SCHED] [CHUNK] [STRIDE_H] [STRIDE_W] [POST_COPY_WAIT] [FILE_WAIT_RETRIES] [SEED]
 #
 # Positional:
-#   HMIN HMAX H_STEP   : inclusive stepped range for -H
-#   WMIN WMAX W_STEP   : inclusive stepped range for -W
-#   KHMIN KHMAX KH_STEP: inclusive stepped range for -kH
-#   KWMIN KWMAX KW_STEP: inclusive stepped range for -kW
+#   HMIN HMAX H_STEP   : inclusive stepped range for H (input height)
+#   WMIN WMAX W_STEP   : inclusive stepped range for W (input width)
+#   KHMIN KHMAX KH_STEP: inclusive stepped range for kH (kernel height)
+#   KWMIN KWMAX KW_STEP: inclusive stepped range for kW (kernel width)
 #
 # Optional:
-#   POST_COPY_WAIT     : seconds to wait after job leaves queue unless files exist (default: 10)
-#   FILE_WAIT_RETRIES  : how many 2s retries for files (default: 60 ≈ 120s)
-#   NP                 : number of MPI processes (default: 4)
+#   THREADS            : OpenMP threads (default: 8)
+#   SCHED              : OpenMP schedule type (default: static)
+#   CHUNK              : OpenMP chunk size (optional, leave empty for default)
 #   STRIDE_H           : vertical stride (default: 1)
 #   STRIDE_W           : horizontal stride (default: 1)
-#   SEED               : RNG seed (optional)
+#   POST_COPY_WAIT     : seconds to wait after job leaves queue unless files exist (default: 10)
+#   FILE_WAIT_RETRIES  : how many 2s retries for files (default: 60 ≈ 120s)
+#   SEED               : RNG seed forwarded to conv2d_omp (omit to use program default)
 
 set -euo pipefail
 
 if [[ $# -lt 12 ]]; then
-  echo "Usage: $0 HMIN HMAX H_STEP WMIN WMAX W_STEP KHMIN KHMAX KH_STEP KWMIN KWMAX KW_STEP [POST_COPY_WAIT] [FILE_WAIT_RETRIES] [NP] [STRIDE_H] [STRIDE_W] [SEED]" >&2
+  echo "Usage: $0 HMIN HMAX H_STEP WMIN WMAX W_STEP KHMIN KHMAX KH_STEP KWMIN KWMAX KW_STEP [THREADS] [SCHED] [CHUNK] [STRIDE_H] [STRIDE_W] [POST_COPY_WAIT] [FILE_WAIT_RETRIES] [SEED]" >&2
   exit 1
 fi
 
@@ -30,15 +32,17 @@ HMIN="$1"; HMAX="$2"; HSTEP="$3"
 WMIN="$4"; WMAX="$5"; WSTEP="$6"
 KHMIN="$7"; KHMAX="$8"; KHSTEP="$9"
 KWMIN="${10}"; KWMAX="${11}"; KWSTEP="${12}"
-POST_COPY_WAIT="${13:-10}"
-FILE_WAIT_RETRIES="${14:-60}"
-NP="${15:-4}"
-STRIDE_H="${16:-1}"
-STRIDE_W="${17:-1}"
-SEED="${18:-}"
+THREADS="${13:-8}"
+SCHED="${14:-static}"
+CHUNK="${15:-}"
+STRIDE_H="${16:-1}"            # vertical stride
+STRIDE_W="${17:-1}"            # horizontal stride
+POST_COPY_WAIT="${18:-10}"     # seconds
+FILE_WAIT_RETRIES="${19:-60}"  # each retry waits 2s
+SEED="${20:-}"                 # optional
 
 # Validation
-for v in "$HMIN" "$HMAX" "$HSTEP" "$WMIN" "$WMAX" "$WSTEP" "$KHMIN" "$KHMAX" "$KHSTEP" "$KWMIN" "$KWMAX" "$KWSTEP" "$POST_COPY_WAIT" "$FILE_WAIT_RETRIES" "$NP"; do
+for v in "$HMIN" "$HMAX" "$HSTEP" "$WMIN" "$WMAX" "$WSTEP" "$KHMIN" "$KHMAX" "$KHSTEP" "$KWMIN" "$KWMAX" "$KWSTEP" "$THREADS" "$POST_COPY_WAIT" "$FILE_WAIT_RETRIES"; do
   [[ "$v" =~ ^-?[0-9]+$ ]] || { echo "Error: non-integer argument: $v" >&2; exit 2; }
 done
 (( HSTEP > 0 )) || { echo "Error: H_STEP must be > 0" >&2; exit 2; }
@@ -51,28 +55,33 @@ echo "  H: $HMIN..$HMAX step $HSTEP"
 echo "  W: $WMIN..$WMAX step $WSTEP"
 echo "  kH: $KHMIN..$KHMAX step $KHSTEP"
 echo "  kW: $KWMIN..$KWMAX step $KWSTEP"
-echo "  MPI: np=$NP  STRIDE_H=$STRIDE_H  STRIDE_W=$STRIDE_W"
+echo "  THREADS=$THREADS  SCHED=$SCHED  CHUNK=${CHUNK:-default}  STRIDE_H=$STRIDE_H  STRIDE_W=$STRIDE_W"
 echo "  POST_COPY_WAIT=${POST_COPY_WAIT}s  FILE_WAIT_RETRIES=$FILE_WAIT_RETRIES  SEED=${SEED:-<default>}"
 
 mkdir -p logs metrics
 
-range_step() { local s="$1" e="$2" st="$3"; local x; for ((x=s; x<=e; x+=st)); do echo "$x"; done; }
+range_step() {
+  local start="$1" end="$2" step="$3" x
+  for ((x=start; x<=end; x+=step)); do
+    echo "$x"
+  done
+}
 
 submit_and_block() {
   local H="$1" W="$2" KH="$3" KW="$4"
 
   local submit_out jobid
   if [[ -n "$SEED" ]]; then
-    submit_out=$(sbatch slurm_helpers/conv2d_mpi_param.slurm "$H" "$W" "$KH" "$KW" "$NP" same zero "$STRIDE_H" "$STRIDE_W" "$SEED")
+    submit_out=$(sbatch slurm_helpers/conv2d_omp_param.slurm "$H" "$W" "$KH" "$KW" "$THREADS" "$SCHED" "$CHUNK" same zero "$STRIDE_H" "$STRIDE_W" "$SEED")
   else
-    submit_out=$(sbatch slurm_helpers/conv2d_mpi_param.slurm "$H" "$W" "$KH" "$KW" "$NP" same zero "$STRIDE_H" "$STRIDE_W")
+    submit_out=$(sbatch slurm_helpers/conv2d_omp_param.slurm "$H" "$W" "$KH" "$KW" "$THREADS" "$SCHED" "$CHUNK" same zero "$STRIDE_H" "$STRIDE_W")
   fi
 
   jobid=$(awk '{print $4}' <<<"$submit_out")
   [[ -n "${jobid:-}" ]] || { echo "Failed to parse job id from: $submit_out" >&2; exit 3; }
-  echo "Submitted JOBID=$jobid  (H=$H, W=$W, kH=$KH, kW=$KW, np=$NP)"
+  echo "Submitted JOBID=$jobid  (H=$H, W=$W, kH=$KH, kW=$KW, threads=$THREADS, sched=$SCHED)"
 
-  local err="logs/conv2d_mpi_${jobid}.err"
+  local err="logs/conv2d_omp_${jobid}.err"
   local csv="metrics/metrics_SLURM_${jobid}.csv"
 
   # Wait while job is still in queue/running
@@ -102,11 +111,11 @@ submit_and_block() {
 }
 
 for H in $(range_step "$HMIN" "$HMAX" "$HSTEP"); do
-  echo "=== H=$H ==="
   for W in $(range_step "$WMIN" "$WMAX" "$WSTEP"); do
-    echo " -> W=$W"
+    echo "=== H=$H, W=$W ==="
     for KH in $(range_step "$KHMIN" "$KHMAX" "$KHSTEP"); do
       for KW in $(range_step "$KWMIN" "$KWMAX" "$KWSTEP"); do
+        echo " -> kH=$KH, kW=$KW"
         submit_and_block "$H" "$W" "$KH" "$KW"
       done
     done

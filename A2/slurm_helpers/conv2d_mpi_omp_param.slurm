@@ -15,7 +15,7 @@ module load gcc/14.2
 module load openmpi/5.0.5
 
 # Usage:
-#   sbatch conv2d_mpi_omp_param.slurm H W kH kW [NP] [THREADS] [SCHED] [CHUNK] [MODE] [PADDING] [SEED]
+#   sbatch conv2d_mpi_omp_param.slurm H W kH kW [NP] [THREADS] [SCHED] [CHUNK] [MODE] [PADDING] [STRIDE_H] [STRIDE_W] [SEED]
 #
 # Positional:
 #   H, W           : input matrix dimensions
@@ -28,6 +28,8 @@ module load openmpi/5.0.5
 #   CHUNK          : OpenMP chunk size (optional, leave empty for default)
 #   MODE           : convolution mode (same|full, default: same)
 #   PADDING        : padding mode (zero|none|const, default: zero)
+#   STRIDE_H       : vertical stride (default: 1)
+#   STRIDE_W       : horizontal stride (default: 1)
 #   SEED           : RNG seed (optional)
 
 mkdir -p logs metrics
@@ -38,7 +40,7 @@ if [ ! -x ./conv2d_mpi_omp ] || [ conv2d_mpi_omp.c -nt conv2d_mpi_omp ]; then
 fi
 
 if [ $# -lt 4 ]; then
-  echo "Usage: sbatch conv2d_mpi_omp_param.slurm H W kH kW [NP] [THREADS] [SCHED] [CHUNK] [MODE] [PADDING] [SEED]" >&2
+  echo "Usage: sbatch conv2d_mpi_omp_param.slurm H W kH kW [NP] [THREADS] [SCHED] [CHUNK] [MODE] [PADDING] [STRIDE_H] [STRIDE_W] [SEED]" >&2
   exit 2
 fi
 
@@ -52,7 +54,9 @@ SCHED="${7:-static}"   # OpenMP schedule
 CHUNK="${8:-}"         # OpenMP chunk size
 MODE="${9:-same}"      # convolution mode
 PADDING="${10:-zero}"  # padding mode
-SEED="${11:-}"         # RNG seed
+STRIDE_H="${11:-1}"    # vertical stride
+STRIDE_W="${12:-1}"    # horizontal stride
+SEED="${13:-}"         # RNG seed
 
 OUT="/dev/null"
 
@@ -71,10 +75,10 @@ else
 fi
 
 # Build command
-CMD=( mpiexec -n "$NP" ./conv2d_mpi_omp -H "$H" -W "$W" -kH "$KH" -kW "$KW" -o "$OUT" -m "$MODE" -p "$PADDING" )
+CMD=( mpiexec -n "$NP" ./conv2d_mpi_omp -H "$H" -W "$W" -kH "$KH" -kW "$KW" -o "$OUT" -m "$MODE" -p "$PADDING" -sH "$STRIDE_H" -sW "$STRIDE_W" )
 CMD+=( --threads "$THREADS" --schedule "$SCHED" )
 [ -n "$CHUNK" ] && [ "$CHUNK" -gt 0 ] 2>/dev/null && CMD+=( --chunk "$CHUNK" )
-[ -n "$SEED" ] && CMD+=( -s "$SEED" )
+[ -n "$SEED" ] && CMD+=( -se "$SEED" )
 
 echo "Running: ${CMD[*]}"
 "${CMD[@]}"

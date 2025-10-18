@@ -13,7 +13,7 @@
 module load gcc/14.2
 
 # Usage:
-#   sbatch conv2d_seq_param.slurm H W kH kW [MODE] [PADDING] [SEED]
+#   sbatch conv2d_seq_param.slurm H W kH kW [MODE] [PADDING] [STRIDE_H] [STRIDE_W] [SEED]
 #
 # Positional:
 #   H, W           : input matrix dimensions
@@ -22,6 +22,8 @@ module load gcc/14.2
 # Optional:
 #   MODE           : convolution mode (same|full, default: same)
 #   PADDING        : padding mode (zero|none|const, default: zero)
+#   STRIDE_H       : vertical stride (default: 1)
+#   STRIDE_W       : horizontal stride (default: 1)
 #   SEED           : RNG seed (optional)
 
 mkdir -p logs metrics
@@ -32,7 +34,7 @@ if [ ! -x ./conv2d ] || [ conv2d.c -nt conv2d ]; then
 fi
 
 if [ $# -lt 4 ]; then
-  echo "Usage: sbatch conv2d_seq_param.slurm H W kH kW [MODE] [PADDING] [SEED]" >&2
+  echo "Usage: sbatch conv2d_seq_param.slurm H W kH kW [MODE] [PADDING] [STRIDE_H] [STRIDE_W] [SEED]" >&2
   exit 2
 fi
 
@@ -42,12 +44,14 @@ KH="$3"
 KW="$4"
 MODE="${5:-same}"     # convolution mode
 PADDING="${6:-zero}"  # padding mode
-SEED="${7:-}"         # RNG seed
+STRIDE_H="${7:-1}"    # vertical stride
+STRIDE_W="${8:-1}"    # horizontal stride
+SEED="${9:-}"         # RNG seed
 
 OUT="/dev/null"
 
 # Build command
-CMD=( ./conv2d -H "$H" -W "$W" -kH "$KH" -kW "$KW" -o "$OUT" -m "$MODE" -p "$PADDING" )
+CMD=( ./conv2d -H "$H" -W "$W" -kH "$KH" -kW "$KW" -o "$OUT" -m "$MODE" -p "$PADDING" -sH "$STRIDE_H" -sW "$STRIDE_W" )
 [ -n "$SEED" ] && CMD+=( -s "$SEED" )
 
 echo "Running: ${CMD[*]}"

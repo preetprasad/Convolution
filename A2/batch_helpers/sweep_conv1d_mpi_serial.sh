@@ -1,53 +1,47 @@
 #!/usr/bin/env bash
-# Serial SLURM sweep for conv1d_mpi_omp: stepped loops over L and K.
+# Serial SLURM sweep for conv1d_mpi (pure MPI, no OpenMP)
 # Submits one job at a time and blocks until BOTH stderr and metrics CSV appear.
 #
 # Usage:
-#   ./sweep_conv1d_mpi_omp_serial.sh LMIN LMAX L_STEP KMIN KMAX K_STEP [POST_COPY_WAIT] [FILE_WAIT_RETRIES] [NP] [THREADS] [SCHED] [CHUNK] [STRIDE] [SEED]
+#   ./sweep_conv1d_mpi_serial.sh NMIN NMAX N_STEP KMIN KMAX K_STEP [NP] [STRIDE] [POST_COPY_WAIT] [FILE_WAIT_RETRIES] [SEED]
 #
 # Positional:
-#   LMIN LMAX L_STEP   : inclusive stepped range for -L
-#   KMIN KMAX K_STEP   : inclusive stepped range for -kL
+#   NMIN NMAX N_STEP   : inclusive stepped range for -L (input length)
+#   KMIN KMAX K_STEP   : inclusive stepped range for -kL (kernel length)
 #
 # Optional:
+#   NP                 : Number of MPI processes (default: 4)
+#   STRIDE             : output stride (default: 1)
 #   POST_COPY_WAIT     : seconds to wait after job leaves queue unless files exist (default: 10)
 #   FILE_WAIT_RETRIES  : how many 2s retries for files (default: 60 ≈ 120s)
-#   NP                 : number of MPI processes (default: 4)
-#   THREADS            : OpenMP threads per process (default: 4)
-#   SCHED              : OpenMP schedule (default: static)
-#   CHUNK              : OpenMP chunk size (optional)
-#   STRIDE             : output stride (default: 1)
-#   SEED               : RNG seed (optional)
+#   SEED               : RNG seed forwarded to conv1d_mpi (omit to use program default)
 
 set -euo pipefail
 
 if [[ $# -lt 6 ]]; then
-  echo "Usage: $0 LMIN LMAX L_STEP KMIN KMAX K_STEP [POST_COPY_WAIT] [FILE_WAIT_RETRIES] [NP] [THREADS] [SCHED] [CHUNK] [STRIDE] [SEED]" >&2
+  echo "Usage: $0 NMIN NMAX N_STEP KMIN KMAX K_STEP [NP] [STRIDE] [POST_COPY_WAIT] [FILE_WAIT_RETRIES] [SEED]" >&2
   exit 1
 fi
 
-LMIN="$1"; LMAX="$2"; LSTEP="$3"
+NMIN="$1"; NMAX="$2"; NSTEP="$3"
 KMIN="$4"; KMAX="$5"; KSTEP="$6"
-POST_COPY_WAIT="${7:-10}"
-FILE_WAIT_RETRIES="${8:-60}"
-NP="${9:-4}"
-THREADS="${10:-4}"
-SCHED="${11:-static}"
-CHUNK="${12:-}"
-STRIDE="${13:-1}"
-SEED="${14:-}"
+NP="${7:-4}"
+STRIDE="${8:-1}"              # output stride
+POST_COPY_WAIT="${9:-10}"     # seconds
+FILE_WAIT_RETRIES="${10:-60}"  # each retry waits 2s
+SEED="${11:-}"                # optional
 
 # Validation
-for v in "$LMIN" "$LMAX" "$LSTEP" "$KMIN" "$KMAX" "$KSTEP" "$POST_COPY_WAIT" "$FILE_WAIT_RETRIES" "$NP" "$THREADS"; do
+for v in "$NMIN" "$NMAX" "$NSTEP" "$KMIN" "$KMAX" "$KSTEP" "$NP" "$POST_COPY_WAIT" "$FILE_WAIT_RETRIES"; do
   [[ "$v" =~ ^-?[0-9]+$ ]] || { echo "Error: non-integer argument: $v" >&2; exit 2; }
 done
-(( LSTEP > 0 )) || { echo "Error: L_STEP must be > 0" >&2; exit 2; }
+(( NSTEP > 0 )) || { echo "Error: N_STEP must be > 0" >&2; exit 2; }
 (( KSTEP > 0 )) || { echo "Error: K_STEP must be > 0" >&2; exit 2; }
 
 echo "Sweep config:"
-echo "  L: $LMIN..$LMAX step $LSTEP"
+echo "  N: $NMIN..$NMAX step $NSTEP"
 echo "  K: $KMIN..$KMAX step $KSTEP"
-echo "  MPI: np=$NP, OMP: threads=$THREADS, schedule=$SCHED, chunk=${CHUNK:-default}, STRIDE=$STRIDE"
+echo "  NP=$NP  STRIDE=$STRIDE"
 echo "  POST_COPY_WAIT=${POST_COPY_WAIT}s  FILE_WAIT_RETRIES=$FILE_WAIT_RETRIES  SEED=${SEED:-<default>}"
 
 mkdir -p logs metrics
@@ -60,20 +54,20 @@ range_step() {
 }
 
 submit_and_block() {
-  local L="$1" K="$2"
+  local N="$1" K="$2"
 
   local submit_out jobid
   if [[ -n "$SEED" ]]; then
-    submit_out=$(sbatch slurm_helpers/conv1d_mpi_omp_param.slurm "$L" "$K" "$NP" "$THREADS" "$SCHED" "$CHUNK" same zero "$STRIDE" "$SEED")
+    submit_out=$(sbatch slurm_helpers/conv1d_mpi_param.slurm "$N" "$K" "$NP" same zero "$STRIDE" "$SEED")
   else
-    submit_out=$(sbatch slurm_helpers/conv1d_mpi_omp_param.slurm "$L" "$K" "$NP" "$THREADS" "$SCHED" "$CHUNK" same zero "$STRIDE")
+    submit_out=$(sbatch slurm_helpers/conv1d_mpi_param.slurm "$N" "$K" "$NP" same zero "$STRIDE")
   fi
 
   jobid=$(awk '{print $4}' <<<"$submit_out")
   [[ -n "${jobid:-}" ]] || { echo "Failed to parse job id from: $submit_out" >&2; exit 3; }
-  echo "Submitted JOBID=$jobid  (L=$L, K=$K, np=$NP, threads=$THREADS)"
+  echo "Submitted JOBID=$jobid  (N=$N, K=$K, np=$NP)"
 
-  local err="logs/conv1d_mpi_omp_${jobid}.err"
+  local err="logs/conv1d_mpi_${jobid}.err"
   local csv="metrics/metrics_SLURM_${jobid}.csv"
 
   # Wait while job is still in queue/running
@@ -102,11 +96,11 @@ submit_and_block() {
   echo "OK: Found stderr ($err) and metrics CSV ($csv) for JOBID=$jobid"
 }
 
-for L in $(range_step "$LMIN" "$LMAX" "$LSTEP"); do
-  echo "=== L=$L ==="
+for N in $(range_step "$NMIN" "$NMAX" "$NSTEP"); do
+  echo "=== N=$N ==="
   for K in $(range_step "$KMIN" "$KMAX" "$KSTEP"); do
     echo " -> K=$K"
-    submit_and_block "$L" "$K"
+    submit_and_block "$N" "$K"
   done
 done
 

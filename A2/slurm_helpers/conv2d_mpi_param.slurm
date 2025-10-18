@@ -15,7 +15,7 @@ module load gcc/14.2
 module load openmpi/5.0.5
 
 # Usage:
-#   sbatch conv2d_mpi_param.slurm H W kH kW [NP] [MODE] [PADDING] [SEED]
+#   sbatch conv2d_mpi_param.slurm H W kH kW [NP] [MODE] [PADDING] [STRIDE_H] [STRIDE_W] [SEED]
 #
 # Positional:
 #   H, W           : input matrix dimensions
@@ -25,6 +25,8 @@ module load openmpi/5.0.5
 #   NP             : number of MPI processes (default: 4, must match --ntasks)
 #   MODE           : convolution mode (same|full, default: same)
 #   PADDING        : padding mode (zero|none|const, default: zero)
+#   STRIDE_H       : vertical stride (default: 1)
+#   STRIDE_W       : horizontal stride (default: 1)
 #   SEED           : RNG seed (optional)
 
 mkdir -p logs metrics
@@ -35,7 +37,7 @@ if [ ! -x ./conv2d_mpi ] || [ conv2d_mpi.c -nt conv2d_mpi ]; then
 fi
 
 if [ $# -lt 4 ]; then
-  echo "Usage: sbatch conv2d_mpi_param.slurm H W kH kW [NP] [MODE] [PADDING] [SEED]" >&2
+  echo "Usage: sbatch conv2d_mpi_param.slurm H W kH kW [NP] [MODE] [PADDING] [STRIDE_H] [STRIDE_W] [SEED]" >&2
   exit 2
 fi
 
@@ -46,13 +48,15 @@ KW="$4"
 NP="${5:-4}"          # number of MPI processes
 MODE="${6:-same}"     # convolution mode
 PADDING="${7:-zero}"  # padding mode
-SEED="${8:-}"         # RNG seed
+STRIDE_H="${8:-1}"    # vertical stride
+STRIDE_W="${9:-1}"    # horizontal stride
+SEED="${10:-}"        # RNG seed
 
 OUT="/dev/null"
 
 # Build command
-CMD=( mpiexec -n "$NP" ./conv2d_mpi -H "$H" -W "$W" -kH "$KH" -kW "$KW" -o "$OUT" -m "$MODE" -p "$PADDING" )
-[ -n "$SEED" ] && CMD+=( -s "$SEED" )
+CMD=( mpiexec -n "$NP" ./conv2d_mpi -H "$H" -W "$W" -kH "$KH" -kW "$KW" -o "$OUT" -m "$MODE" -p "$PADDING" -sH "$STRIDE_H" -sW "$STRIDE_W" )
+[ -n "$SEED" ] && CMD+=( -se "$SEED" )
 
 echo "Running: ${CMD[*]}"
 "${CMD[@]}"

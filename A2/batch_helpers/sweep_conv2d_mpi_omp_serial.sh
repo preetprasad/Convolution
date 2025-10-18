@@ -3,7 +3,7 @@
 # Submits one job at a time and blocks until BOTH stderr and metrics CSV appear.
 #
 # Usage:
-#   ./sweep_conv2d_mpi_omp_serial.sh HMIN HMAX H_STEP WMIN WMAX W_STEP KHMIN KHMAX KH_STEP KWMIN KWMAX KW_STEP [POST_COPY_WAIT] [FILE_WAIT_RETRIES] [NP] [THREADS] [SCHED] [CHUNK] [SEED]
+#   ./sweep_conv2d_mpi_omp_serial.sh HMIN HMAX H_STEP WMIN WMAX W_STEP KHMIN KHMAX KH_STEP KWMIN KWMAX KW_STEP [POST_COPY_WAIT] [FILE_WAIT_RETRIES] [NP] [THREADS] [SCHED] [CHUNK] [STRIDE_H] [STRIDE_W] [SEED]
 #
 # Positional:
 #   HMIN HMAX H_STEP   : inclusive stepped range for -H
@@ -18,12 +18,14 @@
 #   THREADS            : OpenMP threads per process (default: 4)
 #   SCHED              : OpenMP schedule (default: static)
 #   CHUNK              : OpenMP chunk size (optional)
+#   STRIDE_H           : vertical stride (default: 1)
+#   STRIDE_W           : horizontal stride (default: 1)
 #   SEED               : RNG seed (optional)
 
 set -euo pipefail
 
 if [[ $# -lt 12 ]]; then
-  echo "Usage: $0 HMIN HMAX H_STEP WMIN WMAX W_STEP KHMIN KHMAX KH_STEP KWMIN KWMAX KW_STEP [POST_COPY_WAIT] [FILE_WAIT_RETRIES] [NP] [THREADS] [SCHED] [CHUNK] [SEED]" >&2
+  echo "Usage: $0 HMIN HMAX H_STEP WMIN WMAX W_STEP KHMIN KHMAX KH_STEP KWMIN KWMAX KW_STEP [POST_COPY_WAIT] [FILE_WAIT_RETRIES] [NP] [THREADS] [SCHED] [CHUNK] [STRIDE_H] [STRIDE_W] [SEED]" >&2
   exit 1
 fi
 
@@ -37,7 +39,9 @@ NP="${15:-4}"
 THREADS="${16:-4}"
 SCHED="${17:-static}"
 CHUNK="${18:-}"
-SEED="${19:-}"
+STRIDE_H="${19:-1}"
+STRIDE_W="${20:-1}"
+SEED="${21:-}"
 
 # Validation
 for v in "$HMIN" "$HMAX" "$HSTEP" "$WMIN" "$WMAX" "$WSTEP" "$KHMIN" "$KHMAX" "$KHSTEP" "$KWMIN" "$KWMAX" "$KWSTEP" "$POST_COPY_WAIT" "$FILE_WAIT_RETRIES" "$NP" "$THREADS"; do
@@ -53,7 +57,7 @@ echo "  H: $HMIN..$HMAX step $HSTEP"
 echo "  W: $WMIN..$WMAX step $WSTEP"
 echo "  kH: $KHMIN..$KHMAX step $KHSTEP"
 echo "  kW: $KWMIN..$KWMAX step $KWSTEP"
-echo "  MPI: np=$NP, OMP: threads=$THREADS, schedule=$SCHED, chunk=${CHUNK:-default}"
+echo "  MPI: np=$NP, OMP: threads=$THREADS, schedule=$SCHED, chunk=${CHUNK:-default}  STRIDE_H=$STRIDE_H  STRIDE_W=$STRIDE_W"
 echo "  POST_COPY_WAIT=${POST_COPY_WAIT}s  FILE_WAIT_RETRIES=$FILE_WAIT_RETRIES  SEED=${SEED:-<default>}"
 
 mkdir -p logs metrics
@@ -64,7 +68,11 @@ submit_and_block() {
   local H="$1" W="$2" KH="$3" KW="$4"
 
   local submit_out jobid
-  submit_out=$(sbatch slurm_helpers/conv2d_mpi_omp_param.slurm "$H" "$W" "$KH" "$KW" "$NP" "$THREADS" "$SCHED" "$CHUNK" same zero "$SEED")
+  if [[ -n "$SEED" ]]; then
+    submit_out=$(sbatch slurm_helpers/conv2d_mpi_omp_param.slurm "$H" "$W" "$KH" "$KW" "$NP" "$THREADS" "$SCHED" "$CHUNK" same zero "$STRIDE_H" "$STRIDE_W" "$SEED")
+  else
+    submit_out=$(sbatch slurm_helpers/conv2d_mpi_omp_param.slurm "$H" "$W" "$KH" "$KW" "$NP" "$THREADS" "$SCHED" "$CHUNK" same zero "$STRIDE_H" "$STRIDE_W")
+  fi
 
   jobid=$(awk '{print $4}' <<<"$submit_out")
   [[ -n "${jobid:-}" ]] || { echo "Failed to parse job id from: $submit_out" >&2; exit 3; }

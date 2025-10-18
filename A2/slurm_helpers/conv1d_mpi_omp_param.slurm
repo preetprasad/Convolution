@@ -15,7 +15,7 @@ module load gcc/14.2
 module load openmpi/5.0.5
 
 # Usage:
-#   sbatch conv1d_mpi_omp_param.slurm N K [NP] [THREADS] [SCHED] [CHUNK] [MODE] [PADDING] [SEED]
+#   sbatch conv1d_mpi_omp_param.slurm N K [NP] [THREADS] [SCHED] [CHUNK] [MODE] [PADDING] [STRIDE] [SEED]
 #
 # Positional:
 #   N, K           : input and kernel lengths
@@ -27,6 +27,7 @@ module load openmpi/5.0.5
 #   CHUNK          : OpenMP chunk size (optional, leave empty for default)
 #   MODE           : convolution mode (same|full, default: same)
 #   PADDING        : padding mode (zero|none|const, default: zero)
+#   STRIDE         : output stride (default: 1)
 #   SEED           : RNG seed (optional)
 
 mkdir -p logs metrics
@@ -37,7 +38,7 @@ if [ ! -x ./conv1d_mpi_omp ] || [ conv1d_mpi_omp.c -nt conv1d_mpi_omp ]; then
 fi
 
 if [ $# -lt 2 ]; then
-  echo "Usage: sbatch conv1d_mpi_omp_param.slurm N K [NP] [THREADS] [SCHED] [CHUNK] [MODE] [PADDING] [SEED]" >&2
+  echo "Usage: sbatch conv1d_mpi_omp_param.slurm N K [NP] [THREADS] [SCHED] [CHUNK] [MODE] [PADDING] [STRIDE] [SEED]" >&2
   exit 2
 fi
 
@@ -49,7 +50,8 @@ SCHED="${5:-static}"   # OpenMP schedule
 CHUNK="${6:-}"         # OpenMP chunk size
 MODE="${7:-same}"      # convolution mode
 PADDING="${8:-zero}"   # padding mode
-SEED="${9:-}"          # RNG seed
+STRIDE="${9:-1}"       # output stride
+SEED="${10:-}"         # RNG seed
 
 OUT="/dev/null"
 
@@ -68,10 +70,10 @@ else
 fi
 
 # Build command
-CMD=( mpiexec -n "$NP" ./conv1d_mpi_omp -L "$N" -kL "$K" -o "$OUT" -m "$MODE" -p "$PADDING" )
+CMD=( mpiexec -n "$NP" ./conv1d_mpi_omp -L "$N" -kL "$K" -o "$OUT" -m "$MODE" -p "$PADDING" -st "$STRIDE" )
 CMD+=( --threads "$THREADS" --schedule "$SCHED" )
 [ -n "$CHUNK" ] && [ "$CHUNK" -gt 0 ] 2>/dev/null && CMD+=( --chunk "$CHUNK" )
-[ -n "$SEED" ] && CMD+=( -s "$SEED" )
+[ -n "$SEED" ] && CMD+=( -se "$SEED" )
 
 echo "Running: ${CMD[*]}"
 "${CMD[@]}"
