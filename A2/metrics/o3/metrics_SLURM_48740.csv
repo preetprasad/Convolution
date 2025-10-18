@@ -1,0 +1,2 @@
+RunID,H,W,KH,KW,outH,outW,op,mode,padding,cval,sH,sW,time,gflops
+SLURM_48740,1024,1024,3,3,512,512,conv,same,zero,0,2,2,0.001916898,2.461577
